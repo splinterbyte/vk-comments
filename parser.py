@@ -35,7 +35,6 @@ def get_latest_posts(owner_id, count=100, offset=0):
         return []
 
 def get_all_comments(owner_id, post_id, count=100):
-    time.sleep(0.5)
     url = 'https://api.vk.com/method/wall.getComments' 
     params_base = {
         'access_token': ACCESS_TOKEN,
@@ -45,29 +44,42 @@ def get_all_comments(owner_id, post_id, count=100):
     }
 
     all_comments = []
-    limit_per_page = 20  # Максимум 20 комментариев за один запрос
+    limit_per_page = 20
+    retries = 5  # Максимальное число попыток
+    delay = 1    # Начальная задержка между попытками
+
     for offset in range(0, count, limit_per_page):
-        params = params_base.copy()
-        params['count'] = limit_per_page
-        params['offset'] = offset
+        attempt = 0
+        while attempt < retries:
+            print(f"[PARSER] Получаю комментарии к посту ID={post_id} (offset={offset})")
+            params = params_base.copy()
+            params['count'] = limit_per_page
+            params['offset'] = offset
 
-        try:
-            response = requests.get(url, params=params)
-            data = response.json()
+            try:
+                response = requests.get(url, params=params)
+                data = response.json()
 
-            if 'response' in data:
-                items = data['response']['items']
-                all_comments.extend(items)
-                print(f"[PARSER] Найдено комментариев (пакет {offset}-{offset+limit_per_page}): {len(items)}")
-            else:
-                print(f"[ERROR] wall.getComments для post_id={post_id} вернул ошибку: {data}")
-                break
-
-              # Пауза между пакетами
-
-        except Exception as e:
-            print(f"[ERROR] Ошибка при получении комментариев (post_id={post_id}): {e}")
-            break
+                if 'response' in data:
+                    items = data['response']['items']
+                    all_comments.extend(items)
+                    print(f"[PARSER] Найдено комментариев (пакет {offset}-{offset+limit_per_page}): {len(items)}")
+                    time.sleep(0.5)
+                    break  # Выход из цикла, если успешно
+                else:
+                    print(f"[ERROR] wall.getComments для post_id={post_id} вернул ошибку: {data}")
+                    if data.get('error', {}).get('error_code') == 6:
+                        print(f"[RETRY] Слишком много запросов. Жду {delay} секунд...")
+                        time.sleep(delay)
+                        attempt += 1
+                        delay *= 2  # Увеличиваем задержку
+                    else:
+                        break
+            except Exception as e:
+                print(f"[ERROR] Ошибка при получении комментариев (post_id={post_id}): {e}")
+                time.sleep(delay)
+                attempt += 1
+                delay *= 2
 
     print(f"[PARSER] Всего комментариев к посту {post_id}: {len(all_comments)}")
     return all_comments
