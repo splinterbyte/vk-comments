@@ -35,6 +35,7 @@ def get_latest_posts(owner_id, count=100, offset=0):
         return []
 
 def get_all_comments(owner_id, post_id, count=100):
+    time.sleep(0.5)
     url = 'https://api.vk.com/method/wall.getComments' 
     params_base = {
         'access_token': ACCESS_TOKEN,
@@ -62,7 +63,7 @@ def get_all_comments(owner_id, post_id, count=100):
                 print(f"[ERROR] wall.getComments для post_id={post_id} вернул ошибку: {data}")
                 break
 
-            time.sleep(0.5)  # Пауза между пакетами
+              # Пауза между пакетами
 
         except Exception as e:
             print(f"[ERROR] Ошибка при получении комментариев (post_id={post_id}): {e}")
