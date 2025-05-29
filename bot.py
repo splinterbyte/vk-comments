@@ -9,6 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from parser import run_parser
 import os
 from dotenv import load_dotenv
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 # --- Настройки ---
 load_dotenv()
@@ -22,13 +23,28 @@ if not BOT_TOKEN:
 AUTHORIZED_USERS = set()
 user_data = {}
 
+def get_start_keyboard():
+    builder = ReplyKeyboardBuilder()
+    builder.add(types.KeyboardButton(text="/start"))
+    return builder.as_markup(resize_keyboard=True, one_time_keyboard=False)
+
 # --- Команда /start ---
 async def start_handler(message: types.Message):
-    chat_id = message.chat.id
-    AUTHORIZED_USERS.add(chat_id)
-    user_data[chat_id] = set()
-    logger.info(f"Пользователь {chat_id} начал отслеживание")
-    await message.answer("✅ Вы добавлены в прослеживание комменатриев!")
+    if message.chat.id not in AUTHORIZED_USERS:
+        chat_id = message.chat.id
+        AUTHORIZED_USERS.add(chat_id)
+        user_data[chat_id] = set()
+        logger.info(f"Пользователь {chat_id} начал отслеживание")
+        await message.answer("✅ Вы добавлены в отслеживание комменатриев!", reply_markup=get_start_keyboard())
+    else:
+        await message.answer("Вы уже добавлены в отслеживание!", reply_markup=get_start_keyboard())
+
+# --- Команда /stop ---
+async def stop_handler(message: types.Message):
+    if message.chat.id in AUTHORIZED_USERS:
+        AUTHORIZED_USERS.remove(message.chat.id)
+        user_data.pop(message.chat.id, None)
+        
 
 # --- Фоновая проверка совпадений ---
 async def check_new_matches(bot: Bot):
@@ -39,7 +55,7 @@ async def check_new_matches(bot: Bot):
             # --- Отправляем всем пользователям "Проверка началась..." ---
             for chat_id in AUTHORIZED_USERS.copy():
                 task = asyncio.create_task(
-                    bot.send_message(chat_id, '🔍 Проверка началась...')
+                    bot.send_message(chat_id, '🔍 Проверка началась...', reply_markup=get_start_keyboard())
                 )
                 tasks.append(task)
 
@@ -66,7 +82,7 @@ async def check_new_matches(bot: Bot):
                             f"Теги: {match['tags']}"
                         )
                         send_tasks.append(
-                            bot.send_message(chat_id, message)
+                            bot.send_message(chat_id, message, reply_markup=get_start_keyboard())
                         )
                         # Сохраняем, что пользователь получил это
                         user_data.setdefault(chat_id, set()).add(key)
@@ -82,7 +98,7 @@ async def check_new_matches(bot: Bot):
             for chat_id in AUTHORIZED_USERS.copy():
                 if not user_has_new.get(chat_id, True):  # Если не было новых совпадений
                     no_matches_tasks.append(
-                        bot.send_message(chat_id, '❌ Новых совпадений не найдено')
+                        bot.send_message(chat_id, '❌ Новых совпадений не найдено', reply_markup=get_start_keyboard())
                     )
 
             # --- Параллельная отправка "нет совпадений" ---
