@@ -47,20 +47,39 @@ async def stop_handler(message: types.Message):
         
 
 # --- Фоновая проверка совпадений ---
+# Где-то глобально или в хранилище
+last_bot_message_id = {}  # chat_id -> message_id
+
+
 async def check_new_matches(bot: Bot):
     while True:
         try:
             tasks = []
+            start_message_ids = {}  # chat_id -> message_id (новые "Проверка началась...")
+            
+            # --- Удаление старого статусного сообщения (если есть) ---
+            delete_old_tasks = []
+            for chat_id in AUTHORIZED_USERS.copy():
+                msg_id = last_bot_message_id.get(chat_id)
+                if msg_id:
+                    delete_old_tasks.append(bot.delete_message(chat_id, msg_id))
+            
+            if delete_old_tasks:
+                await asyncio.gather(*delete_old_tasks, return_exceptions=True)
 
             # --- Отправляем всем пользователям "Проверка началась..." ---
             for chat_id in AUTHORIZED_USERS.copy():
-                task = asyncio.create_task(
-                    bot.send_message(chat_id, '🔍 Проверка началась...', reply_markup=get_start_keyboard())
-                )
-                tasks.append(task)
-
-            await asyncio.gather(*tasks)  # Ждём, пока все получат стартовое сообщение
-            tasks.clear()
+                try:
+                    message = await bot.send_message(
+                        chat_id,
+                        '🔍 Проверка началась...',
+                        reply_markup=get_start_keyboard()
+                    )
+                    start_message_ids[chat_id] = message.message_id
+                    # Обновляем ID текущего бот-сообщения
+                    last_bot_message_id[chat_id] = message.message_id
+                except Exception as e:
+                    logger.error(f"Не удалось отправить сообщение пользователю {chat_id}: {e}")
 
             # --- Запуск парсера ---
             loop = asyncio.get_event_loop()
@@ -72,21 +91,20 @@ async def check_new_matches(bot: Bot):
             user_has_new = {chat_id: False for chat_id in AUTHORIZED_USERS}
 
             for match in matches:
-                asyncio.sleep(0.333)
+                await asyncio.sleep(0.333)
                 key = match["comment_link"]
                 for chat_id in AUTHORIZED_USERS.copy():
                     if key not in user_data.get(chat_id, set()):
-                        message = (
+                        message_text = (
                             f"{match['text']}\n"
                             f"{match['comment_link']}\n"
                             f"Теги: {match['tags']}"
                         )
                         send_tasks.append(
-                            bot.send_message(chat_id, message, reply_markup=get_start_keyboard())
+                            bot.send_message(chat_id, message_text, reply_markup=get_start_keyboard())
                         )
-                        # Сохраняем, что пользователь получил это
                         user_data.setdefault(chat_id, set()).add(key)
-                        user_has_new[chat_id] = True  # Указываем, что были новые совпадения
+                        user_has_new[chat_id] = True
 
             # --- Параллельная отправка новых совпадений ---
             if send_tasks:
@@ -94,14 +112,31 @@ async def check_new_matches(bot: Bot):
             send_tasks.clear()
 
             # --- Отправка ❌ Новых совпадений не найдено тем, кто ничего не получил ---
+            # --- Отправка ❌ Новых совпадений не найдено тем, кто ничего не получил ---
             no_matches_tasks = []
-            for chat_id in AUTHORIZED_USERS.copy():
-                if not user_has_new.get(chat_id, True):  # Если не было новых совпадений
-                    no_matches_tasks.append(
-                        bot.send_message(chat_id, '❌ Новых совпадений не найдено', reply_markup=get_start_keyboard())
-                    )
+            delete_start_tasks = []
 
-            # --- Параллельная отправка "нет совпадений" ---
+            for chat_id in AUTHORIZED_USERS.copy():
+                if not user_has_new.get(chat_id, True):  # Не было новых совпадений
+                    # Удалить начальное сообщение "Проверка началась..."
+                    msg_id = start_message_ids.get(chat_id)
+                    if msg_id:
+                        delete_start_tasks.append(bot.delete_message(chat_id, msg_id))
+
+                    # Отправить новое сообщение
+                    try:
+                        message = await bot.send_message(
+                            chat_id,
+                            '❌ Новых совпадений не найдено',
+                            reply_markup=get_start_keyboard()
+                        )
+                        last_bot_message_id[chat_id] = message.message_id  # Сохраняем ID нового сообщения
+                    except Exception as e:
+                        logger.error(f"Не удалось отправить сообщение пользователю {chat_id}: {e}")
+
+            # Выполняем удаление старых сообщений
+            if delete_start_tasks:
+                await asyncio.gather(*delete_start_tasks, return_exceptions=True)
             if no_matches_tasks:
                 await asyncio.gather(*no_matches_tasks)
 

@@ -46,7 +46,7 @@ def get_all_comments(owner_id, post_id, count=100):
     all_comments = []
     limit_per_page = 20
     retries = 5  # Максимальное число попыток
-    delay = 1    # Начальная задержка между попытками
+    delay = 2    # Начальная задержка между попытками
 
     for offset in range(0, count, limit_per_page):
         attempt = 0
